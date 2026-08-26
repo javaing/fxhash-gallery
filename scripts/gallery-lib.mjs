@@ -119,6 +119,7 @@ export const ERAS = [
 ]
 
 export function eraOf(createdAt) {
+  if (!createdAt) return '2023-on'
   const year = Number(createdAt.slice(0, 4))
   const quarter = Math.floor((Number(createdAt.slice(5, 7)) - 1) / 3) + 1
   if (year < 2022) return '2021'
@@ -131,15 +132,21 @@ export function eraOf(createdAt) {
 export const isCollab = (t) => Boolean(t.author?.id?.startsWith('KT1'))
 
 /** The one-line credit a plaque shows: the artist, or every collaborator. */
+/** Catalog / collaboration records are keyed by generative project id. */
+const projectKey = (t) => String(t.generativeId ?? t.id)
+
 export function creditOf(t, collaborations = {}) {
-  const members = collaborations[String(t.id)]?.collaborators
+  const members = collaborations[projectKey(t)]?.collaborators
   if (members?.length) return creditLine(members)
   return t.author?.name ?? t.author?.id ?? 'unknown'
 }
 
 /** createdAt ascending, ties by id — the one ordering used everywhere in the building. */
-export const byDate = (a, b) =>
-  a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id - b.id
+export const byDate = (a, b) => {
+  const ac = a.createdAt ?? ''
+  const bc = b.createdAt ?? ''
+  return ac < bc ? -1 : ac > bc ? 1 : a.id - b.id
+}
 
 /**
  * Who gets a room, and which hall everything else hangs in.
@@ -149,7 +156,7 @@ export const byDate = (a, b) =>
  * artists come back in order of their earliest piece — that order decides which
  * hall their door opens off and which side it is on.
  */
-export function assignRooms(tokens, collaborations = {}, { volumes = new Map(), twoPieceRooms = TWO_PIECE_ROOMS } = {}) {
+export function assignRooms(tokens, collaborations = {}, { volumes = new Map(), twoPieceRooms = TWO_PIECE_ROOMS, eras = ERAS } = {}) {
   const sorted = [...tokens].sort(byDate)
 
   const perArtist = new Map()
@@ -164,6 +171,8 @@ export function assignRooms(tokens, collaborations = {}, { volumes = new Map(), 
   const artists = [...perArtist.values()]
   // Two pieces is a room only for the best-selling handful of such artists —
   // enough for the ones people collected, not so many that the corridor empties.
+  // A collection gallery passes a large twoPieceRooms so "I hold two of yours"
+  // is enough for a room; sales volume does not apply.
   const twoPiece = artists
     .filter((a) => a.projects.length === SOLO_MIN - 1)
     .map((a) => ({ a, tez: a.projects.reduce((sum, t) => sum + (volumes.get(t.id) ?? 0), 0) }))
@@ -173,8 +182,13 @@ export function assignRooms(tokens, collaborations = {}, { volumes = new Map(), 
   const solo = artists.filter((a) => a.projects.length >= SOLO_MIN || twoPiece.includes(a))
   const soloIds = new Set(solo.flatMap((a) => a.projects.map((t) => t.id)))
 
-  const halls = new Map(ERAS.map((e) => [e.id, []]))
-  for (const t of sorted) if (!soloIds.has(t.id)) halls.get(eraOf(t.createdAt)).push(t)
+  const halls = new Map(eras.map((e) => [e.id, []]))
+  for (const t of sorted) {
+    if (soloIds.has(t.id)) continue
+    const era = eraOf(t.createdAt)
+    if (halls.has(era)) halls.get(era).push(t)
+    else halls.get(eras[eras.length - 1].id).push(t)
+  }
 
   // Distinct people credited, collaboration members included. A collaboration
   // with no recorded collaborators entry is skipped rather than falling through to
@@ -183,7 +197,7 @@ export function assignRooms(tokens, collaborations = {}, { volumes = new Map(), 
   // did not (yet) resolve.
   const people = new Set()
   for (const t of sorted) {
-    const members = collaborations[String(t.id)]?.collaborators
+    const members = collaborations[projectKey(t)]?.collaborators
     if (members?.length) for (const m of members) people.add(m.id)
     else if (t.author?.id && !isCollab(t)) people.add(t.author.id)
   }
@@ -685,9 +699,9 @@ function settlePortals(legs, portals, gapsOf) {
  * portals stack is the later era's — the earlier one had no pieces to hang
  * between them.
  */
-function corridorSections(parts, portals, stacked) {
+function corridorSections(parts, portals, stacked, eras = ERAS) {
   const sections = new Map()
-  let era = ERAS[0]
+  let era = eras[0]
   for (const part of parts) {
     if (part.kind === 'leg') {
       const list = [...portals.get(part), ...stacked.filter((s) => s.leg === part).map((s) => ({ pos: 0, era: s.era }))]
@@ -695,7 +709,7 @@ function corridorSections(parts, portals, stacked) {
       const out = []
       for (let i = 0; i + 1 < cuts.length; i++) {
         const here = list.filter((p) => p.pos === cuts[i])
-        for (const p of here) if (ERAS.indexOf(p.era) > ERAS.indexOf(era)) era = p.era
+        for (const p of here) if (eras.indexOf(p.era) > eras.indexOf(era)) era = p.era
         out.push({ id: i === 0 ? part.id : `${part.id}-${i + 1}`, from: cuts[i], to: cuts[i + 1], era, portal: here.length > 0 })
       }
       sections.set(part, out)
@@ -713,8 +727,8 @@ function corridorSections(parts, portals, stacked) {
  * an era's sections cannot hold its pieces, returns instead how many short each
  * era is, for nudgePortals to act on.
  */
-function hangCorridor(parts, portals, stacked, shared, gapsOf, widthOf) {
-  const sections = corridorSections(parts, portals, stacked)
+function hangCorridor(parts, portals, stacked, shared, gapsOf, widthOf, eras = ERAS) {
+  const sections = corridorSections(parts, portals, stacked, eras)
   const cutsOf = (leg, side) => [
     ...gapsOf(leg, side),
     ...portals.get(leg).filter((p) => p.pos > 0).map((p) => ({ from: p.pos - WALL_T / 2, to: p.pos + WALL_T / 2 })),
@@ -726,7 +740,7 @@ function hangCorridor(parts, portals, stacked, shared, gapsOf, widthOf) {
   }
   const hung = []
   const deficits = new Map()
-  for (const era of ERAS) {
+  for (const era of eras) {
     const pieces = shared.filter((t) => eraOf(t.createdAt) === era.id)
     const mine = runs.filter((r) => sectionOf(r).era === era)
     const counts = share(mine, pieces.length)
@@ -755,10 +769,10 @@ function hangCorridor(parts, portals, stacked, shared, gapsOf, widthOf) {
  * loop grows instead. settlePortals runs after, so a nudged portal still keeps
  * clear of doors.
  */
-function nudgePortals(deficits, portals, legs) {
+function nudgePortals(deficits, portals, legs, eras = ERAS) {
   let moved = false
   for (const [era, short] of deficits) {
-    const after = ERAS[ERAS.indexOf(era) + 1]
+    const after = eras[eras.indexOf(era) + 1]
     if (!after) continue
     for (const leg of legs) {
       const p = portals.get(leg).find((q) => q.era === after && q.pos > 0)
@@ -783,9 +797,16 @@ function nudgePortals(deficits, portals, legs) {
  * back into the lobby says you have come full circle. Nothing here depends on
  * input order — see byDate — so the same archive gives the same building.
  */
-export function buildGallery({ tokens, collaborations = {}, volumes = new Map(), sizes = new Map(), previews = new Map(), tints = new Map(), pieceTints = new Map(), catalog = null, generatedAt }) {
+export function buildGallery({ tokens, collaborations = {}, volumes = new Map(), sizes = new Map(), previews = new Map(), tints = new Map(), pieceTints = new Map(), catalog = null, collection = null, generatedAt }) {
   const visible = tokens.filter((t) => !HIDDEN_FLAGS.has(t.flag))
-  const { solo, halls, artistCount } = assignRooms(visible, collaborations, { volumes })
+  const used = new Set(visible.map((t) => eraOf(t.createdAt)))
+  const eras = collection ? ERAS.filter((e) => used.has(e.id)) : ERAS
+  const eraList = eras.length ? eras : ERAS
+  const { solo, halls, artistCount } = assignRooms(visible, collaborations, {
+    volumes,
+    twoPieceRooms: collection ? Number.MAX_SAFE_INTEGER : undefined,
+    eras: eraList,
+  })
   const shared = [...halls.values()].flat().sort(byDate)
 
   /**
@@ -808,14 +829,14 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   // Giving portals a slot of their own is what keeps them the same pitch from the
   // pictures as the pictures are from each other, and in era order by construction.
   const items = []
-  const pending = ERAS.slice(1)
+  const pending = eraList.slice(1)
   for (const t of shared) {
-    const era = ERAS.findIndex((e) => e.id === eraOf(t.createdAt))
-    while (pending.length && ERAS.indexOf(pending[0]) <= era) items.push({ portal: pending.shift() })
+    const era = eraList.findIndex((e) => e.id === eraOf(t.createdAt))
+    while (pending.length && eraList.indexOf(pending[0]) <= era) items.push({ portal: pending.shift() })
     items.push({ piece: t })
   }
   for (const era of pending) items.push({ portal: era })
-  const years = visible.map((t) => Number(t.createdAt.slice(0, 4)))
+  const years = visible.map((t) => Number(String(t.createdAt ?? '').slice(0, 4))).filter((y) => y > 0)
   const span = years.length ? [Math.min(...years), Math.max(...years)] : [0, 0]
 
   // Grow the loop until the rooms keep their beat and the walls hold every piece.
@@ -846,7 +867,7 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
     // both walls, each era's pieces hung by their widths in its own sections.
     // share() says when the walls cannot hold that many at all, and then the
     // loop grows.
-    for (let k = 0; k <= ERAS.length; k++) {
+    for (let k = 0; k <= eraList.length; k++) {
       const counts = share(runs, items.length + k)
       if (!counts) break
       const walk = assignWalk(runs, counts, items, parts, legs)
@@ -854,9 +875,9 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
       settlePortals(legs, walk.portals, gapsOf)
       let corridor = null
       for (let round = 0; round < 8 && !corridor; round++) {
-        const result = hangCorridor(parts, walk.portals, walk.stacked, shared, gapsOf, widthOf)
+        const result = hangCorridor(parts, walk.portals, walk.stacked, shared, gapsOf, widthOf, eraList)
         if (result.hung) corridor = result
-        else if (nudgePortals(result.deficits, walk.portals, legs)) settlePortals(legs, walk.portals, gapsOf)
+        else if (nudgePortals(result.deficits, walk.portals, legs, eraList)) settlePortals(legs, walk.portals, gapsOf)
         else break
       }
       if (corridor) { layout = { L, parts, legs, placed, gapsOf, portals: walk.portals, stacked: walk.stacked, ...corridor }; break }
@@ -873,12 +894,15 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   const hang = (t, room, point, normal) =>
     paintings.push({
       project: t.id, slug: t.slug, name: t.name, artist: creditOf(t, collaborations),
-      year: Number(t.createdAt.slice(0, 4)), room, x: r6(point.x), z: r6(point.z), yaw: yawOf(normal), tile: 0,
+      year: Number(String(t.createdAt ?? '').slice(0, 4)) || 0, room, x: r6(point.x), z: r6(point.z), yaw: yawOf(normal), tile: 0,
       ...shapeOf(t),
-      ...(previews.has(t.id) ? { preview: previews.get(t.id) } : {}),
-      // This piece's own colour, for the sculpture generated from it. Absent
-      // where the work has no agreed colour, or none at all.
+      ...(previews.has(t.id) ? { preview: previews.get(t.id) } : t.query ? { preview: t.query } : {}),
       ...(pieceTints.has(t.id) ? { tint: pieceTints.get(t.id) } : {}),
+      ...(t.generativeId != null ? { generativeId: t.generativeId } : {}),
+      ...(t.contract ? { contract: t.contract, tokenId: String(t.tokenId) } : {}),
+      ...(t.seed ? { seed: t.seed } : {}),
+      ...(t.artifactUri ? { artifactUri: t.artifactUri } : {}),
+      ...(collection?.address ? { owner: { address: collection.address, alias: collection.alias ?? null } } : {}),
     })
   /** A sign on a wall at `point` (on the wall line), facing `normal`, stood off like a painting. */
   const sign = (kind, text, point, normal, y, w, h) =>
@@ -899,8 +923,10 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   // leg A, the title above that opening and the first era's name on the pier
   // beside it; the east side is a lintel over the way back in, with the sign
   // that says the walk is done.
+  const houseName = collection?.title || collection?.alias || 'fxhash'
+  const houseTitle = collection ? (collection.title || collection.alias || 'collection') : 'fxhash archive'
   rooms.push({
-    id: 'lobby', kind: 'lobby', title: 'fxhash',
+    id: 'lobby', kind: 'lobby', title: houseName,
     rect: { x: -HX, z: 0, w: LOBBY, d: LOBBY }, entry: { x: 0, z: LOBBY / 2, yaw: 0 },
   })
   walls.push(
@@ -921,19 +947,18 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   // bottom edge below the strapline's top and the two overlapped.
   const stack = STRAP_H / 2 + TITLE_GAP + TITLE_H / 2
   const titleY = r6(Math.min(countY + stack, underCeiling(LOBBY_H, TITLE_H)))
-  sign('title', 'fxhash archive', { x: 0, z: LOBBY }, { x: 0, z: -1 }, titleY, TITLE_W, TITLE_H)
-  // The years belong to the catalogue, not to the 420 hung here. Quoting the
-  // gallery's own span made the lobby say fxhash ended in 2024, when the 420 are
-  // simply the ones whose code could be archived — the platform ran to July 2025.
-  // With no catalogue given (an older data file, or a test) it falls back to what
-  // it can vouch for on its own, which is this building's span.
-  const strapline = catalog
-    ? `${visible.length} archived works · ${artistCount} artists · from ${catalog.count.toLocaleString('en-US')} projects, ${catalog.span[0]}–${catalog.span[1]}`
-    : `${visible.length} archived works · ${artistCount} artists · ${span[0]}–${span[1]}`
+  sign('title', houseTitle, { x: 0, z: LOBBY }, { x: 0, z: -1 }, titleY, TITLE_W, TITLE_H)
+  const strapline = collection
+    ? `${visible.length} collected works · ${artistCount} artists · ${span[0]}–${span[1]}`
+    : catalog
+      ? `${visible.length} archived works · ${artistCount} artists · from ${catalog.count.toLocaleString('en-US')} projects, ${catalog.span[0]}–${catalog.span[1]}`
+      : `${visible.length} archived works · ${artistCount} artists · ${span[0]}–${span[1]}`
   // Widened with the title above it: the pair is one block, and a strapline set
   // to a different measure than its title reads as a mistake rather than a choice.
   sign('title', strapline, { x: 0, z: LOBBY }, { x: 0, z: -1 }, countY, TITLE_W, STRAP_H)
-  sign('title', `You have walked the whole of fxhash, ${span[0]}–${span[1]} — the lobby is ahead`, { x: HX, z: LOBBY / 2 }, { x: 1, z: 0 }, 3.5, 3.6, 0.4)
+  sign('title', collection
+    ? `You have walked the collection, ${span[0]}–${span[1]} — the lobby is ahead`
+    : `You have walked the whole of fxhash, ${span[0]}–${span[1]} — the lobby is ahead`, { x: HX, z: LOBBY / 2 }, { x: 1, z: 0 }, 3.5, 3.6, 0.4)
   // The lobby face of the same lintel, read on the way out into leg D. Leg D is
   // the last leg of the loop, so walking out through here is walking the whole
   // timeline backwards, newest first.
@@ -949,7 +974,34 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
 // The wall text, written once and used twice: hung in the lobby, and handed to
   // the client so the HUD's About panel says the same thing. Someone who walks
   // straight past the wall can still read it, and the two cannot drift.
-  const about = [
+  const about = collection
+    ? [
+      {
+        heading: 'About this gallery',
+        lines: [
+          `The ${visible.length} fxhash iterations held by ${houseName},`,
+          `hung in the order the projects were made, ${span[0]} to ${span[1]}.`,
+          'Artists with two or more collected works have their own room;',
+          'the rest line the corridor, which loops back to here.',
+        ],
+      },
+      {
+        heading: 'How to walk it',
+        lines: [
+          'W A S D to walk, the mouse to look, hold Shift to run.',
+          'Click a painting and you step up to it — it runs there on the wall,',
+          'from the seed of the edition hanging here.',
+          'Esc steps back; the Rooms menu jumps to any era or artist.',
+        ],
+        touch: [
+          'Drag to look, tap the floor to walk there.',
+          'Tap a painting and you step up to it — it runs there on the wall,',
+          'from the seed of the edition hanging here.',
+          'Tap again to step back; the Rooms menu jumps to any era or artist.',
+        ],
+      },
+    ]
+    : [
     {
       heading: 'About this gallery',
       lines: [
@@ -988,7 +1040,7 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   // era's name on the lintel facing you. The first era's name is on the pier
   // beside the lobby opening, whose lintel carries the title.
   const markers = [{
-    era: ERAS[0], centre: { x: 0, z: LOBBY + 1 }, dir: { x: 0, z: 1 },
+    era: eraList[0], centre: { x: 0, z: LOBBY + 1 }, dir: { x: 0, z: 1 },
     wall: { x: HX - 1, z: LOBBY }, normal: { x: 0, z: -1 }, y: 2.2, w: 1.8,
   }]
   for (const leg of legs) {
@@ -999,7 +1051,7 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
   for (const { leg, era } of stacked) {
     markers.push({ era, centre: leg.at(1.5), dir: leg.U, wall: leg.at(0), normal: neg(leg.U), y: 2.7, w: 5 })
   }
-  markers.sort((p, q) => ERAS.indexOf(p.era) - ERAS.indexOf(q.era))
+  markers.sort((p, q) => eraList.indexOf(p.era) - eraList.indexOf(q.era))
   for (const m of markers) {
     rooms.push({
       id: m.era.id, kind: 'era', title: m.era.label,
@@ -1011,7 +1063,7 @@ export function buildGallery({ tokens, collaborations = {}, volumes = new Map(),
     // are walked; naming only the era ahead left anyone who turned round with
     // nothing to steer by. Going back you enter the era before this one — and
     // the first era has none, so the back of that opening is the lobby's sign.
-    const before = ERAS[ERAS.indexOf(m.era) - 1]
+    const before = eraList[eraList.indexOf(m.era) - 1]
     if (before) sign('era', before.label, m.wall, neg(m.normal), m.y, m.w, 0.8)
   }
 

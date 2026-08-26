@@ -11,12 +11,13 @@
 //
 // Usage: node scripts/build-gallery.mjs
 
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { buildGallery, tileRect, ATLAS, ATLAS_SMALL, TILES_PER_ATLAS } from './gallery-lib.mjs'
 import { newTintAcc, addPixels, tintOf, mergeTintAcc } from './gallery-tint.mjs'
-import { readArchiveInputs } from './gallery-inputs.mjs'
+import { readArchiveInputs, readHoldingsInputs } from './gallery-inputs.mjs'
 
 const DATA = 'public/data'
 const OUT_DIR = join(DATA, 'gallery')
@@ -101,9 +102,12 @@ async function writeAtlas(file, paintings, thumbs, atlas) {
 }
 
 async function main() {
-  const { tokens, collaborations, thumbs, volumes, sizes, previews, catalog } = await readArchiveInputs(DATA)
+  const holdingsPath = join(DATA, 'holdings.json')
+  const { tokens, collaborations, thumbs, volumes, sizes, previews, catalog, collection } = existsSync(holdingsPath)
+    ? await readHoldingsInputs(DATA)
+    : await readArchiveInputs(DATA)
   const generatedAt = new Date().toISOString()
-  const inputs = { tokens, collaborations, volumes, sizes, previews, catalog, generatedAt }
+  const inputs = { tokens, collaborations, volumes, sizes, previews, catalog, collection, generatedAt }
   // Lay out, learn what colour each room's art is, lay out again with it.
   const { tints, pieceTints } = await sampleTints(buildGallery(inputs), thumbs)
   const gallery = buildGallery({ ...inputs, tints, pieceTints })

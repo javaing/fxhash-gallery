@@ -165,3 +165,25 @@ test('the way out to the project page opens a new tab', async () => {
   expect(link.getAttribute('target')).toBe('_blank')
   expect(link.getAttribute('rel')).toContain('noopener')
 })
+
+test('a held iteration opens on its own seed and does not page editions', async () => {
+  vi.spyOn(data, 'loadSummary').mockResolvedValue({ runners: [99], archived: [99] } as never)
+  const held: Painting = {
+    ...painting,
+    name: 'Turtle Vision #182',
+    generativeId: 99,
+    contract: 'KT1EfsNuqwLAWDd3o4pvfUx1CAh5GMdTrRvr',
+    tokenId: '30439',
+    seed: 'onnomQm',
+    preview: '?fxhash=onnomQm',
+    owner: { address: 'tz1cpZ7eLovJigqcUsfbjmquuezjToZLtGUZ', alias: 'FABDAO' },
+  }
+  render(<MemoryRouter><Viewer painting={held} rect={rect} onBack={vi.fn()} /></MemoryRouter>)
+  const frame = await screen.findByTitle('Turtle Vision #182 (archived copy)')
+  expect(frame.getAttribute('src')).toContain('data/generators/99/_run.html?fxhash=onnomQm')
+  expect(screen.queryByRole('button', { name: '›' })).toBeNull()
+  expect(screen.queryByText(/of 3/)).toBeNull()
+  expect(screen.getByRole('link', { name: /this edition/i }).getAttribute('href'))
+    .toBe('/gentk/KT1EfsNuqwLAWDd3o4pvfUx1CAh5GMdTrRvr/30439')
+  expect(screen.getByRole('link', { name: 'FABDAO' })).toBeTruthy()
+})

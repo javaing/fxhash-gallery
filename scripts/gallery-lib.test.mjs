@@ -316,6 +316,37 @@ test('buildGallery is deterministic', () => {
   expect(JSON.stringify(a)).toBe(JSON.stringify(b))
 })
 
+test('a collection hangs two iterations of the same project as two paintings', () => {
+  const author = { id: 'tz1tv', name: 's_r_r_z' }
+  const tokens = [
+    tok(30030439, '2023-04-01T00:00:00.000Z', author, {
+      name: 'Turtle Vision #182', generativeId: 99, contract: 'KT1Efs', tokenId: '30439', seed: 'ooA',
+    }),
+    tok(30030441, '2023-04-01T00:00:00.000Z', author, {
+      name: 'Turtle Vision #183', generativeId: 99, contract: 'KT1Efs', tokenId: '30441', seed: 'ooB',
+    }),
+    tok(30030443, '2023-04-02T00:00:00.000Z', author, {
+      name: 'Turtle Vision #184', generativeId: 99, contract: 'KT1Efs', tokenId: '30443', seed: 'ooC',
+    }),
+    tok(20000001, '2022-06-01T00:00:00.000Z', { id: 'tz1other', name: 'Other' }, {
+      name: 'Solo #1', generativeId: 1, contract: 'KT1U6', tokenId: '1', seed: 'ooD',
+    }),
+  ]
+  const g = buildGallery({
+    tokens,
+    generatedAt: 'x',
+    collection: { address: 'tz1cpZ', alias: 'FABDAO', title: 'FABDAO' },
+  })
+  expect(g.paintings.map((p) => p.name).sort()).toEqual([
+    'Solo #1', 'Turtle Vision #182', 'Turtle Vision #183', 'Turtle Vision #184',
+  ])
+  expect(g.paintings.filter((p) => p.generativeId === 99)).toHaveLength(3)
+  expect(g.rooms.find((r) => r.id === 'tz1tv')?.kind).toBe('solo')
+  expect(g.signs.find((s) => s.text === 'FABDAO')).toBeTruthy()
+  expect(g.signs.find((s) => /collected works/.test(s.text))).toBeTruthy()
+  expect(g.rooms.filter((r) => r.kind === 'era').map((r) => r.id)).toEqual(['2022-q2', '2023-on'])
+})
+
 test('tileRect maps a tile to its file, cell and pixel origin, in both sizes', () => {
   expect(tileRect(0)).toEqual({ file: 0, col: 0, row: 0, x: 4, y: 4, cell: 264 })
   expect(tileRect(224)).toEqual({ file: 0, col: 14, row: 14, x: 3700, y: 3700, cell: 264 })

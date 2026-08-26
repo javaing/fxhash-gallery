@@ -18,6 +18,7 @@
     "artists:names": "node scripts/apply-artist-names.mjs",
     "summary": "node scripts/build-summary.mjs",
     "gallery": "node scripts/build-gallery.mjs",
+    "holdings": "node scripts/fetch-wallet-holdings.mjs",
     "check:gateways": "node scripts/check-gateways.mjs",
     "build:runners": "node scripts/build-runners.mjs",
     "thumbs:compress": "node scripts/compress-thumbnails.mjs",

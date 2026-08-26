@@ -17,3 +17,10 @@ test('ignores garbage and empties rather than throwing', () => {
   expect(parseGalleryQuery('?room=')).toEqual({})
   expect(parseGalleryQuery('?project=12&room=x')).toEqual({ project: 12, room: 'x' })
 })
+
+test('reads a held token as contract/tokenId', () => {
+  expect(parseGalleryQuery('?token=KT1EfsNuqwLAWDd3o4pvfUx1CAh5GMdTrRvr/30439')).toEqual({
+    token: 'KT1EfsNuqwLAWDd3o4pvfUx1CAh5GMdTrRvr/30439',
+  })
+  expect(parseGalleryQuery('?token=nopath')).toEqual({})
+})

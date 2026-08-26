@@ -89,3 +89,53 @@ export async function readArchiveInputs(dataDir = 'public/data') {
 
   return { tokens, collaborations, thumbs, volumes, sizes, previews, catalog }
 }
+
+/**
+ * A wallet's held iterations, as tokens `buildGallery` can hang one-per-piece.
+ * Each holding has a unique `id`; `generativeId` is the fxhash project, which
+ * several holdings may share.
+ */
+export async function readHoldingsInputs(dataDir = 'public/data') {
+  const holdings = JSON.parse(await readFile(join(dataDir, 'holdings.json'), 'utf8'))
+  const collaborations = await readFile(join(dataDir, 'collaborations.json'), 'utf8')
+    .then((s) => JSON.parse(s).byProject ?? {})
+    .catch(() => ({}))
+
+  const thumbs = {}
+  for (const f of await readdir(join(dataDir, 'holdings-thumbs')).catch(() => [])) {
+    const m = f.match(/^(\d+)\.\w+$/)
+    if (m) thumbs[m[1]] = join(dataDir, 'holdings-thumbs', f)
+  }
+
+  const sizes = new Map(Object.entries(holdings.sizes ?? {}).map(([id, v]) => [Number(id), { w: v.w, h: v.h }]))
+  const previews = new Map()
+  const tokens = []
+  for (const item of holdings.items ?? []) {
+    if (item.query) previews.set(item.id, item.query)
+    tokens.push({
+      ...item,
+      owner: holdings.owner ?? null,
+      flag: item.flag || 'NONE',
+    })
+  }
+
+  const years = tokens.map((t) => Number(String(t.createdAt ?? '').slice(0, 4))).filter((y) => y > 0)
+  const catalog = years.length
+    ? { count: tokens.length, span: [Math.min(...years), Math.max(...years)] }
+    : null
+
+  return {
+    tokens,
+    collaborations,
+    thumbs,
+    volumes: new Map(),
+    sizes,
+    previews,
+    catalog,
+    collection: {
+      address: holdings.owner?.address,
+      alias: holdings.owner?.alias,
+      title: holdings.owner?.alias || holdings.owner?.address,
+    },
+  }
+}

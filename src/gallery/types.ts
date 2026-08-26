@@ -50,9 +50,16 @@ export interface Painting {
    * The query fxhash ran this project's preview with — `?fxhash=…` and, for
    * fx(params) work, a `#0x…` fragment — so the piece can open on the very
    * iteration the thumbnail shows. Absent for the first metadata format, which
-   * never recorded it.
+   * never recorded it. On a collection gallery this is the held edition's query.
    */
   preview?: string
+  /** fxhash generative-token id, when this hanging is one held iteration. */
+  generativeId?: number
+  contract?: string
+  tokenId?: string
+  seed?: string
+  artifactUri?: string
+  owner?: { address: string; alias: string | null }
   /**
    * This piece's own colour, derived from its thumbnail the same way a room's is
    * (scripts/gallery-tint.mjs). Used by the sculpture generated from it, so an

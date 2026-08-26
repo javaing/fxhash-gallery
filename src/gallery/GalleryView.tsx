@@ -17,7 +17,14 @@ import Viewer from './Viewer'
 /** Where a visit begins: in front of the linked painting, inside the linked room, or in the lobby. */
 export function spawnFor(gallery: Gallery, search: string): Pose {
   const q = parseGalleryQuery(search)
-  const painting = q.project !== undefined ? gallery.paintings.find((p) => p.project === q.project) : undefined
+  if (q.token) {
+    const painting = gallery.paintings.find((p) => p.contract && p.tokenId && `${p.contract}/${p.tokenId}` === q.token)
+    if (painting) return standingPose(painting)
+  }
+  const painting = q.project !== undefined
+    ? gallery.paintings.find((p) => p.project === q.project)
+      ?? gallery.paintings.find((p) => p.generativeId === q.project)
+    : undefined
   if (painting) return standingPose(painting)
   const room = q.room ? gallery.rooms.find((r) => r.id === q.room) : undefined
   return room ? room.entry : gallery.spawn
